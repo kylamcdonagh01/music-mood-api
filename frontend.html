@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Music Mood API</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #0f0f1a;
+      color: #f0f0f0;
+      min-height: 100vh;
+    }
+
+    header {
+      background: linear-gradient(135deg, #1db954, #191414);
+      padding: 40px 20px;
+      text-align: center;
+    }
+
+    header h1 {
+      font-size: 2.5rem;
+      font-weight: 800;
+      letter-spacing: -1px;
+    }
+
+    header h1 span { color: #1db954; }
+
+    header p {
+      margin-top: 8px;
+      color: #b3b3b3;
+      font-size: 1rem;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+
+    .card {
+      background: #1a1a2e;
+      border-radius: 16px;
+      padding: 30px;
+      margin-bottom: 30px;
+      border: 1px solid #2a2a3e;
+    }
+
+    .card h2 {
+      font-size: 1.2rem;
+      margin-bottom: 20px;
+      color: #1db954;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-size: 0.85rem;
+    }
+
+    .mood-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .mood-btn {
+      padding: 10px 22px;
+      border-radius: 50px;
+      border: 2px solid #2a2a3e;
+      background: #12122a;
+      color: #f0f0f0;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .mood-btn:hover { border-color: #1db954; color: #1db954; }
+    .mood-btn.active { background: #1db954; color: #000; border-color: #1db954; font-weight: 700; }
+
+    .mood-btn[data-mood="happy"]    { --accent: #f9ca24; }
+    .mood-btn[data-mood="sad"]      { --accent: #74b9ff; }
+    .mood-btn[data-mood="energetic"]{ --accent: #fd79a8; }
+    .mood-btn[data-mood="calm"]     { --accent: #55efc4; }
+    .mood-btn[data-mood="angry"]    { --accent: #d63031; }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    input, select {
+      background: #12122a;
+      border: 1px solid #2a2a3e;
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: #f0f0f0;
+      font-size: 0.95rem;
+      outline: none;
+      transition: border 0.2s;
+    }
+
+    input:focus, select:focus { border-color: #1db954; }
+
+    input[type="number"] { width: 80px; }
+
+    button.search-btn {
+      background: #1db954;
+      color: #000;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 24px;
+      font-weight: 700;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    button.search-btn:hover { background: #1ed760; }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 16px;
+    }
+
+    .stat-box {
+      background: #12122a;
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+      border: 1px solid #2a2a3e;
+    }
+
+    .stat-box .number {
+      font-size: 2rem;
+      font-weight: 800;
+      color: #1db954;
+    }
+
+    .stat-box .label {
+      font-size: 0.8rem;
+      color: #b3b3b3;
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .results-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 16px;
+      margin-top: 20px;
+    }
+
+    .song-card {
+      background: #12122a;
+      border-radius: 12px;
+      padding: 18px;
+      border: 1px solid #2a2a3e;
+      transition: transform 0.2s, border-color 0.2s;
+    }
+
+    .song-card:hover { transform: translateY(-3px); border-color: #1db954; }
+
+    .song-title {
+      font-weight: 700;
+      font-size: 0.95rem;
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .song-artist {
+      color: #b3b3b3;
+      font-size: 0.85rem;
+      margin-bottom: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .song-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .tag {
+      background: #1a1a3e;
+      border-radius: 4px;
+      padding: 3px 8px;
+      font-size: 0.75rem;
+      color: #b3b3b3;
+    }
+
+    .tag.genre { color: #1db954; background: rgba(29,185,84,0.1); }
+    .tag.popularity { color: #f9ca24; background: rgba(249,202,36,0.1); }
+
+    .audio-bars {
+      margin-top: 12px;
+    }
+
+    .bar-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 5px;
+      font-size: 0.75rem;
+      color: #b3b3b3;
+    }
+
+    .bar-row span:first-child { width: 80px; text-align: right; }
+
+    .bar-track {
+      flex: 1;
+      height: 5px;
+      background: #2a2a3e;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      background: #1db954;
+      border-radius: 3px;
+      transition: width 0.5s ease;
+    }
+
+    .bar-fill.energy  { background: #fd79a8; }
+    .bar-fill.valence { background: #f9ca24; }
+    .bar-fill.dance   { background: #74b9ff; }
+
+    .status {
+      text-align: center;
+      padding: 40px;
+      color: #b3b3b3;
+      font-size: 0.95rem;
+    }
+
+    .mood-explain {
+      background: rgba(29,185,84,0.08);
+      border: 1px solid rgba(29,185,84,0.2);
+      border-radius: 10px;
+      padding: 14px 18px;
+      margin-bottom: 16px;
+      font-size: 0.9rem;
+      color: #b3b3b3;
+      display: none;
+    }
+
+    .mood-explain strong { color: #1db954; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🎵 Music <span>Mood</span> API</h1>
+  <p>50,000 real Spotify tracks · Powered by audio science</p>
+</header>
+
+<div class="container">
+
+  <!-- Stats -->
+  <div class="card">
+    <h2>📊 Database Stats</h2>
+    <div class="stats-grid" id="stats">
+      <div class="stat-box"><div class="number" id="stat-songs">—</div><div class="label">Songs</div></div>
+      <div class="stat-box"><div class="number" id="stat-moods">—</div><div class="label">Moods</div></div>
+      <div class="stat-box"><div class="number" id="stat-logs">—</div><div class="label">Logs</div></div>
+      <div class="stat-box"><div class="number" id="stat-genres">—</div><div class="label">Genres</div></div>
+    </div>
+  </div>
+
+  <!-- Mood Recommendations -->
+  <div class="card">
+    <h2>🎯 Mood Recommendations</h2>
+
+    <div class="mood-buttons">
+      <button class="mood-btn" data-mood="happy">😊 Happy</button>
+      <button class="mood-btn" data-mood="sad">😢 Sad</button>
+      <button class="mood-btn" data-mood="energetic">⚡ Energetic</button>
+      <button class="mood-btn" data-mood="calm">🍃 Calm</button>
+      <button class="mood-btn" data-mood="angry">🔥 Angry</button>
+    </div>
+
+    <div class="mood-explain" id="mood-explain"></div>
+
+    <div class="controls">
+      <input type="text" id="genre-filter" placeholder="Genre (optional)" />
+      <input type="number" id="limit" value="9" min="1" max="50" />
+      <button class="search-btn" onclick="getRecommendations()">Get Recommendations</button>
+    </div>
+
+    <div id="results"><div class="status">Select a mood to get started</div></div>
+  </div>
+
+  <!-- Top Songs -->
+  <div class="card">
+    <h2>🏆 Top Songs by Logs</h2>
+    <div id="top-songs"><div class="status">Loading...</div></div>
+  </div>
+
+  <!-- Mood Trends -->
+  <div class="card">
+    <h2>📈 Mood Trends</h2>
+    <div id="mood-trends"><div class="status">Loading...</div></div>
+  </div>
+
+</div>
+
+<script>
+  const API = "http://127.0.0.1:8000";
+  let selectedMood = null;
+
+  // ── Load stats on page load ──────────────────────
+async function loadStats() {
+    try {
+      const [moods, logs, topGenres] = await Promise.all([
+        fetch(`${API}/moods`).then(r => r.json()),
+        fetch(`${API}/logs`).then(r => r.json()),
+        fetch(`${API}/analytics/top-genres`).then(r => r.json()),
+      ]);
+      const genreCount = new Set(topGenres.map(g => g.genre)).size;
+      document.getElementById("stat-songs").textContent = "50,000";
+      document.getElementById("stat-moods").textContent = moods.length;
+      document.getElementById("stat-logs").textContent = logs.length;
+      document.getElementById("stat-genres").textContent = genreCount;
+    } catch(e) {
+      console.error("Stats error:", e);
+    }
+  }
+  
+  // ── Mood button selection ────────────────────────
+  document.querySelectorAll(".mood-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      document.querySelectorAll(".mood-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      selectedMood = btn.dataset.mood;
+
+      // Load mood explanation
+      try {
+        const data = await fetch(`${API}/recommendations/explain/${selectedMood}`).then(r => r.json());
+        const box = document.getElementById("mood-explain");
+        box.style.display = "block";
+        box.innerHTML = `<strong>${selectedMood.toUpperCase()}</strong> — ${data.description}`;
+      } catch(e) {}
+    });
+  });
+
+  // ── Get recommendations ──────────────────────────
+  async function getRecommendations() {
+    if (!selectedMood) {
+      alert("Please select a mood first!");
+      return;
+    }
+
+    const genre = document.getElementById("genre-filter").value.trim();
+    const limit = document.getElementById("limit").value || 9;
+    const resultsDiv = document.getElementById("results");
+
+    resultsDiv.innerHTML = `<div class="status">Finding ${selectedMood} tracks...</div>`;
+
+    let url = `${API}/recommendations?mood=${selectedMood}&limit=${limit}`;
+    if (genre) url += `&genre=${encodeURIComponent(genre)}`;
+
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        const err = await res.json();
+        resultsDiv.innerHTML = `<div class="status">⚠️ ${err.detail}</div>`;
+        return;
+      }
+      const songs = await res.json();
+      renderSongs(songs, resultsDiv);
+    } catch(e) {
+      resultsDiv.innerHTML = `<div class="status">❌ Could not connect to API. Is the server running?</div>`;
+    }
+  }
+
+  // ── Render song cards ────────────────────────────
+  function renderSongs(songs, container) {
+    if (!songs.length) {
+      container.innerHTML = `<div class="status">No songs found for this combination.</div>`;
+      return;
+    }
+
+    container.innerHTML = `<div class="results-grid">${songs.map(s => `
+      <div class="song-card">
+        <div class="song-title" title="${s.title}">${s.title}</div>
+        <div class="song-artist" title="${s.artist}">${s.artist}</div>
+        <div class="song-meta">
+          <span class="tag genre">${s.genre}</span>
+          <span class="tag popularity">⭐ ${s.popularity}</span>
+        </div>
+        <div class="audio-bars">
+          <div class="bar-row">
+            <span>Valence</span>
+            <div class="bar-track"><div class="bar-fill valence" style="width:${(s.valence*100).toFixed(0)}%"></div></div>
+            <span>${(s.valence*100).toFixed(0)}%</span>
+          </div>
+          <div class="bar-row">
+            <span>Energy</span>
+            <div class="bar-track"><div class="bar-fill energy" style="width:${(s.energy*100).toFixed(0)}%"></div></div>
+            <span>${(s.energy*100).toFixed(0)}%</span>
+          </div>
+          <div class="bar-row">
+            <span>Danceability</span>
+            <div class="bar-track"><div class="bar-fill dance" style="width:${(s.danceability*100).toFixed(0)}%"></div></div>
+            <span>${(s.danceability*100).toFixed(0)}%</span>
+          </div>
+        </div>
+      </div>
+    `).join("")}</div>`;
+  }
+
+  // ── Load top songs ───────────────────────────────
+  async function loadTopSongs() {
+    try {
+      const data = await fetch(`${API}/analytics/top-songs?limit=5`).then(r => r.json());
+      const div = document.getElementById("top-songs");
+      if (!data.length) { div.innerHTML = `<div class="status">No logs yet — add some!</div>`; return; }
+      div.innerHTML = data.map((s, i) => `
+        <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #2a2a3e">
+          <span style="color:#1db954;font-weight:800;font-size:1.2rem;width:24px">${i+1}</span>
+          <div>
+            <div style="font-weight:600">${s.title}</div>
+            <div style="color:#b3b3b3;font-size:0.85rem">${s.artist}</div>
+          </div>
+          <span style="margin-left:auto;color:#f9ca24;font-size:0.85rem">🎵 ${s.log_count}</span>
+        </div>
+      `).join("");
+    } catch(e) {}
+  }
+
+  // ── Load mood trends ─────────────────────────────
+  async function loadMoodTrends() {
+    try {
+      const data = await fetch(`${API}/analytics/mood-trends`).then(r => r.json());
+      const div = document.getElementById("mood-trends");
+      if (!data.length) { div.innerHTML = `<div class="status">No logs yet.</div>`; return; }
+      const max = Math.max(...data.map(d => d.count));
+      const icons = { happy:"😊", sad:"😢", energetic:"⚡", calm:"🍃", angry:"🔥" };
+      div.innerHTML = data.map(d => `
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+          <span style="width:100px;font-size:0.9rem">${icons[d.mood]||""} ${d.mood}</span>
+          <div style="flex:1;height:8px;background:#2a2a3e;border-radius:4px;overflow:hidden">
+            <div style="width:${(d.count/max*100)}%;height:100%;background:#1db954;border-radius:4px"></div>
+          </div>
+          <span style="color:#b3b3b3;font-size:0.85rem;width:30px">${d.count}</span>
+        </div>
+      `).join("");
+    } catch(e) {}
+  }
+
+  // ── Init ─────────────────────────────────────────
+  loadStats();
+  loadTopSongs();
+  loadMoodTrends();
+</script>
+</body>
+</html>
