@@ -1,11 +1,20 @@
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security.api_key import APIKeyHeader
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional
 from app import models, schemas
 from app.database import engine, get_db
+from dotenv import load_dotenv
+import anthropic
+import os
+import json
 
+load_dotenv()
+
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+API_SECRET_KEY = os.getenv("API_SECRET_KEY")
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
@@ -22,6 +31,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ─────────────────────────────────────────
+# API KEY AUTHENTICATION
+# ─────────────────────────────────────────
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+async def require_api_key(api_key: str = Security(api_key_header)):
+    if api_key != API_SECRET_KEY:
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid or missing API key. Include your key in the X-API-Key header."
+        )
+    return api_key
 
 # ─────────────────────────────────────────
 # SONGS
@@ -133,7 +155,7 @@ def delete_log(log_id: int, db: Session = Depends(get_db)):
 # ANALYTICS
 # ─────────────────────────────────────────
 
-@app.get("/analytics/top-genres")
+@app.get("/analytics/top-genres", dependencies=[Depends(require_api_key)])
 def top_genres_by_mood(db: Session = Depends(get_db)):
     results = (
         db.query(models.Song.genre, models.Mood.name, func.count(models.Log.id).label("count"))
@@ -146,7 +168,7 @@ def top_genres_by_mood(db: Session = Depends(get_db)):
     return [{"genre": r[0], "mood": r[1], "count": r[2]} for r in results]
 
 
-@app.get("/analytics/mood-trends")
+@app.get("/analytics/mood-trends", dependencies=[Depends(require_api_key)])
 def mood_trends(db: Session = Depends(get_db)):
     results = (
         db.query(models.Mood.name, func.count(models.Log.id).label("count"))
@@ -157,7 +179,7 @@ def mood_trends(db: Session = Depends(get_db)):
     )
     return [{"mood": r[0], "count": r[1]} for r in results]
 
-@app.get("/analytics/top-songs")
+@app.get("/analytics/top-songs", dependencies=[Depends(require_api_key)])
 def top_songs(limit: int = 10, db: Session = Depends(get_db)):
     results = (
         db.query(models.Song.title, models.Song.artist, func.count(models.Log.id).label("log_count"))
@@ -282,4 +304,126 @@ def explain_mood(mood: str):
             "energy": "Intensity and activity level (0.0 = calm, 1.0 = intense)",
             "tempo": "Beats per minute — speed of the track"
         }
+    }
+
+# ─────────────────────────────────────────
+# NATURAL LANGUAGE SEARCH (Claude AI)
+# ─────────────────────────────────────────
+
+@app.get("/search/natural", dependencies=[Depends(require_api_key)])
+async def natural_language_search(
+    query: str = Query(..., description="Describe how you feel or what you want e.g. 'something chill for late night studying'"),
+    limit: int = Query(10, ge=1, le=50),
+    db: Session = Depends(get_db)
+):
+    """
+    Natural language music search powered by Claude AI.
+    Describe a mood, activity, or feeling in plain English and get matching Spotify tracks.
+    """
+
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+    prompt = f"""You are a music recommendation AI with deep knowledge of Spotify audio features.
+
+A user wants music for this situation: "{query}"
+
+Analyse this request and return ONLY a valid JSON object (no explanation, no markdown) with Spotify audio feature thresholds to filter songs. Use these fields:
+- valence_min / valence_max (0.0-1.0): musical positivity
+- energy_min / energy_max (0.0-1.0): intensity and activity  
+- tempo_min / tempo_max (BPM, typically 60-200)
+- danceability_min / danceability_max (0.0-1.0)
+- acousticness_min / acousticness_max (0.0-1.0)
+- reasoning: one sentence explaining your choices
+
+Only include fields that are relevant. For example a sad song needs valence_max but not valence_min.
+
+Example output:
+{{"valence_max": 0.4, "energy_max": 0.5, "reasoning": "Sad songs have low positivity and low intensity"}}
+
+Now analyse: "{query}"
+"""
+
+    try:
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        raw = message.content[0].text.strip()
+
+        # Clean up in case Claude wraps in markdown
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        raw = raw.strip()
+
+        profile = json.loads(raw)
+        reasoning = profile.pop("reasoning", "Audio features matched to your query")
+
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=500,
+            detail="AI returned an unexpected response format. Please try rephrasing your query."
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"AI service error: {str(e)}"
+        )
+
+    # Build database query from Claude's profile
+    song_query = db.query(models.Song).filter(models.Song.valence != None)
+
+    if "valence_min" in profile:
+        song_query = song_query.filter(models.Song.valence >= profile["valence_min"])
+    if "valence_max" in profile:
+        song_query = song_query.filter(models.Song.valence <= profile["valence_max"])
+    if "energy_min" in profile:
+        song_query = song_query.filter(models.Song.energy >= profile["energy_min"])
+    if "energy_max" in profile:
+        song_query = song_query.filter(models.Song.energy <= profile["energy_max"])
+    if "tempo_min" in profile:
+        song_query = song_query.filter(models.Song.tempo >= profile["tempo_min"])
+    if "tempo_max" in profile:
+        song_query = song_query.filter(models.Song.tempo <= profile["tempo_max"])
+    if "danceability_min" in profile:
+        song_query = song_query.filter(models.Song.danceability >= profile["danceability_min"])
+    if "danceability_max" in profile:
+        song_query = song_query.filter(models.Song.danceability <= profile["danceability_max"])
+    if "acousticness_min" in profile:
+        song_query = song_query.filter(models.Song.acousticness >= profile["acousticness_min"])
+    if "acousticness_max" in profile:
+        song_query = song_query.filter(models.Song.acousticness <= profile["acousticness_max"])
+
+    results = song_query.order_by(
+        models.Song.popularity.desc()
+    ).limit(limit).all()
+
+    if not results:
+        raise HTTPException(
+            status_code=404,
+            detail="No songs matched your description. Try a different query."
+        )
+
+    return {
+        "query": query,
+        "ai_reasoning": reasoning,
+        "audio_profile": profile,
+        "results": [
+            {
+                "id": s.id,
+                "title": s.title,
+                "artist": s.artist,
+                "genre": s.genre,
+                "popularity": s.popularity,
+                "valence": s.valence,
+                "energy": s.energy,
+                "tempo": round(s.tempo, 1) if s.tempo else None,
+                "danceability": s.danceability,
+                "acousticness": s.acousticness,
+            }
+            for s in results
+        ]
     }
