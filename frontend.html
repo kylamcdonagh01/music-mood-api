@@ -298,6 +298,28 @@
     <div id="results"><div class="status">Select a mood to get started</div></div>
   </div>
 
+  <!-- Natural Language Search -->
+    <div class="card">
+    <h2>🤖 AI Natural Language Search</h2>
+    <p style="color:#b3b3b3;font-size:0.9rem;margin-bottom:16px;">
+        Describe how you feel or what you're doing in plain English. Claude AI will analyse your words and find matching tracks from 50,000 songs.
+    </p>
+
+    <div class="controls" style="margin-bottom:16px;">
+        <input
+        type="text"
+        id="nl-query"
+        placeholder="e.g. something chill for late night studying..."
+        style="flex:1;min-width:200px;"
+        />
+        <input type="number" id="nl-limit" value="6" min="1" max="50" />
+        <button class="search-btn" onclick="naturalSearch()">Ask AI</button>
+    </div>
+
+    <div id="nl-reasoning" style="display:none;" class="mood-explain"></div>
+    <div id="nl-results"><div class="status">Ask the AI anything...</div></div>
+    </div>
+
   <!-- Top Songs -->
   <div class="card">
     <h2>🏆 Top Songs by Logs</h2>
@@ -455,6 +477,42 @@ async function loadStats() {
       `).join("");
     } catch(e) {}
   }
+
+  // ── Natural Language Search ──────────────────────
+    async function naturalSearch() {
+        const query = document.getElementById("nl-query").value.trim();
+        const limit = document.getElementById("nl-limit").value || 6;
+
+        if (!query) { alert("Please enter a search query!"); return; }
+
+        const resultsDiv = document.getElementById("nl-results");
+        const reasoningDiv = document.getElementById("nl-reasoning");
+
+        resultsDiv.innerHTML = `<div class="status">🤖 Claude is analysing your request...</div>`;
+        reasoningDiv.style.display = "none";
+
+        try {
+        const res = await fetch(`${API}/search/natural?query=${encodeURIComponent(query)}&limit=${limit}`, {
+            headers: { "X-API-Key": "musicmoodapi2026" }
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            resultsDiv.innerHTML = `<div class="status">⚠️ ${err.detail}</div>`;
+            return;
+        }
+
+        const data = await res.json();
+
+        reasoningDiv.style.display = "block";
+        reasoningDiv.innerHTML = `<strong>🤖 Claude's reasoning:</strong> ${data.ai_reasoning}`;
+
+        renderSongs(data.results, resultsDiv);
+
+        } catch(e) {
+        resultsDiv.innerHTML = `<div class="status">❌ Could not connect to API.</div>`;
+        }
+    }
 
   // ── Init ─────────────────────────────────────────
   loadStats();
