@@ -28,9 +28,20 @@ def create_song(song: schemas.SongCreate, db: Session = Depends(get_db)):
 
 
 @app.get("/songs", response_model=List[schemas.SongResponse])
-def get_songs(db: Session = Depends(get_db)):
-    return db.query(models.Song).all()
-
+def get_songs(
+    genre: str = None,
+    artist: str = None,
+    search: str = None,
+    db: Session = Depends(get_db)
+):
+    query = db.query(models.Song)
+    if genre:
+        query = query.filter(models.Song.genre.ilike(f"%{genre}%"))
+    if artist:
+        query = query.filter(models.Song.artist.ilike(f"%{artist}%"))
+    if search:
+        query = query.filter(models.Song.title.ilike(f"%{search}%"))
+    return query.all()
 
 @app.get("/songs/{song_id}", response_model=schemas.SongResponse)
 def get_song(song_id: int, db: Session = Depends(get_db)):
@@ -136,3 +147,15 @@ def mood_trends(db: Session = Depends(get_db)):
         .all()
     )
     return [{"mood": r[0], "count": r[1]} for r in results]
+
+@app.get("/analytics/top-songs")
+def top_songs(limit: int = 10, db: Session = Depends(get_db)):
+    results = (
+        db.query(models.Song.title, models.Song.artist, func.count(models.Log.id).label("log_count"))
+        .join(models.Log, models.Log.song_id == models.Song.id)
+        .group_by(models.Song.id)
+        .order_by(func.count(models.Log.id).desc())
+        .limit(limit)
+        .all()
+    )
+    return [{"title": r[0], "artist": r[1], "log_count": r[2]} for r in results]
