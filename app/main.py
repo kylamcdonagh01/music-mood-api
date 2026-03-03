@@ -1,7 +1,7 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import List
+from typing import List, Optional
 from app import models, schemas
 from app.database import engine, get_db
 
@@ -9,8 +9,8 @@ models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="Music Mood API",
-    description="An API for logging songs with moods and exploring music analytics.",
-    version="1.0.0"
+    description="A data-driven API for discovering music by mood, powered by 50,000 real Spotify tracks.",
+    version="2.0.0"
 )
 
 
@@ -159,3 +159,118 @@ def top_songs(limit: int = 10, db: Session = Depends(get_db)):
         .all()
     )
     return [{"title": r[0], "artist": r[1], "log_count": r[2]} for r in results]
+
+# ─────────────────────────────────────────
+# MOOD-BASED RECOMMENDATIONS
+# ─────────────────────────────────────────
+
+# Mood profiles — maps mood names to Spotify audio feature thresholds
+MOOD_PROFILES = {
+    "happy": {
+        "valence_min": 0.6,
+        "energy_min": 0.5,
+        "description": "High valence and energy — joyful, upbeat tracks"
+    },
+    "sad": {
+        "valence_max": 0.4,
+        "energy_max": 0.5,
+        "description": "Low valence and energy — emotional, melancholic tracks"
+    },
+    "energetic": {
+        "energy_min": 0.8,
+        "tempo_min": 120.0,
+        "description": "Very high energy and fast tempo — workout and hype tracks"
+    },
+    "calm": {
+        "energy_max": 0.4,
+        "tempo_max": 100.0,
+        "description": "Low energy and slow tempo — relaxing, peaceful tracks"
+    },
+    "angry": {
+        "valence_max": 0.4,
+        "energy_min": 0.8,
+        "description": "Low valence, very high energy — intense, aggressive tracks"
+    },
+}
+
+
+@app.get("/recommendations", response_model=List[schemas.RecommendationResponse])
+def get_recommendations(
+    mood: str = Query(..., description="Mood name: happy, sad, energetic, calm, or angry"),
+    genre: Optional[str] = Query(None, description="Optional genre filter e.g. pop, rock, hip-hop"),
+    limit: int = Query(10, ge=1, le=50, description="Number of recommendations (1-50)"),
+    db: Session = Depends(get_db)
+):
+    mood_lower = mood.lower()
+    if mood_lower not in MOOD_PROFILES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown mood '{mood}'. Choose from: {', '.join(MOOD_PROFILES.keys())}"
+        )
+
+    profile = MOOD_PROFILES[mood_lower]
+    query = db.query(models.Song).filter(models.Song.valence != None)
+
+    # Apply mood filters based on profile
+    if "valence_min" in profile:
+        query = query.filter(models.Song.valence >= profile["valence_min"])
+    if "valence_max" in profile:
+        query = query.filter(models.Song.valence <= profile["valence_max"])
+    if "energy_min" in profile:
+        query = query.filter(models.Song.energy >= profile["energy_min"])
+    if "energy_max" in profile:
+        query = query.filter(models.Song.energy <= profile["energy_max"])
+    if "tempo_min" in profile:
+        query = query.filter(models.Song.tempo >= profile["tempo_min"])
+    if "tempo_max" in profile:
+        query = query.filter(models.Song.tempo <= profile["tempo_max"])
+
+    # Optional genre filter
+    if genre:
+        query = query.filter(models.Song.genre.ilike(f"%{genre}%"))
+
+    # Order by popularity so we get well-known tracks first
+    results = query.order_by(models.Song.popularity.desc()).limit(limit).all()
+
+    if not results:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No songs found for mood '{mood}' with the given filters."
+        )
+
+    return [
+        schemas.RecommendationResponse(
+            id=song.id,
+            title=song.title,
+            artist=song.artist,
+            genre=song.genre,
+            valence=song.valence,
+            energy=song.energy,
+            tempo=song.tempo,
+            danceability=song.danceability,
+            popularity=song.popularity,
+            mood_match=mood_lower
+        )
+        for song in results
+    ]
+
+
+@app.get("/recommendations/explain/{mood}")
+def explain_mood(mood: str):
+    mood_lower = mood.lower()
+    if mood_lower not in MOOD_PROFILES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown mood. Choose from: {', '.join(MOOD_PROFILES.keys())}"
+        )
+    profile = MOOD_PROFILES[mood_lower]
+    return {
+        "mood": mood_lower,
+        "description": profile["description"],
+        "filters_applied": {k: v for k, v in profile.items() if k != "description"},
+        "audio_features_explained": {
+            "valence": "Musical positivity (0.0 = sad/dark, 1.0 = happy/bright)",
+            "energy": "Intensity and activity level (0.0 = calm, 1.0 = intense)",
+            "tempo": "Beats per minute — speed of the track"
+        }
+    }

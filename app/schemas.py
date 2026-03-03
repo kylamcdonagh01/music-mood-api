@@ -8,10 +8,24 @@ class SongCreate(BaseModel):
     title: str
     artist: str
     genre: str
-    release_year: int
+    release_year: Optional[int] = None
+    album: Optional[str] = None
+    popularity: Optional[int] = None
+    duration_ms: Optional[int] = None
+    explicit: Optional[bool] = False
+    danceability: Optional[float] = None
+    energy: Optional[float] = None
+    valence: Optional[float] = None
+    tempo: Optional[float] = None
+    acousticness: Optional[float] = None
+    instrumentalness: Optional[float] = None
+    liveness: Optional[float] = None
+    speechiness: Optional[float] = None
+
 
 class SongResponse(SongCreate):
     id: int
+    track_id: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -21,6 +35,7 @@ class SongResponse(SongCreate):
 class MoodCreate(BaseModel):
     name: str
     description: Optional[str] = None
+
 
 class MoodResponse(MoodCreate):
     id: int
@@ -35,9 +50,11 @@ class LogCreate(BaseModel):
     mood_id: int
     user_label: Optional[str] = None
 
+
 class LogUpdate(BaseModel):
     mood_id: int
     user_label: Optional[str] = None
+
 
 class LogResponse(BaseModel):
     id: int
@@ -45,6 +62,23 @@ class LogResponse(BaseModel):
     mood_id: int
     user_label: Optional[str]
     created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# --- Recommendation Schema ---
+class RecommendationResponse(BaseModel):
+    id: int
+    title: str
+    artist: str
+    genre: str
+    valence: Optional[float]
+    energy: Optional[float]
+    tempo: Optional[float]
+    danceability: Optional[float]
+    popularity: Optional[int]
+    mood_match: str
 
     class Config:
         from_attributes = True
