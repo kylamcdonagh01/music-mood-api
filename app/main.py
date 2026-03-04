@@ -346,31 +346,35 @@ Now analyse: "{query}"
     try:
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=300,
+            max_tokens=800,
             messages=[{"role": "user", "content": prompt}]
         )
 
         raw = message.content[0].text.strip()
 
-        # Clean up in case Claude wraps in markdown
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        raw = raw.strip()
+        # Robustly extract JSON
+        if "```" in raw:
+            raw = raw.replace("```json", "").replace("```", "").strip()
 
-        profile = json.loads(raw)
-        reasoning = profile.pop("reasoning", "Audio features matched to your query")
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        if start == -1 or end == 0:
+            raise HTTPException(status_code=500, detail=f"No JSON found in response: {raw[:200]}")
+        raw = raw[start:end]
 
-    except json.JSONDecodeError:
+        journey_plan = json.loads(raw)
+
+    except HTTPException:
+        raise
+    except json.JSONDecodeError as e:
         raise HTTPException(
             status_code=500,
-            detail="AI returned an unexpected response format. Please try rephrasing your query."
+            detail=f"JSON parse failed: {str(e)} | Raw: {raw[:200]}"
         )
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"AI service error: {str(e)}"
+            detail=f"{type(e).__name__}: {str(e)}"
         )
 
     # Build database query from Claude's profile
@@ -426,4 +430,160 @@ Now analyse: "{query}"
             }
             for s in results
         ]
+    }
+
+# ─────────────────────────────────────────
+# MOOD JOURNEY — AI PLAYLIST ARCHITECT
+# ─────────────────────────────────────────
+
+@app.post("/journey", dependencies=[Depends(require_api_key)])
+async def create_mood_journey(
+    request: schemas.JourneyRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    AI-powered mood journey playlist generator.
+    Describe an experience or activity and Claude will architect
+    a multi-stage playlist that evolves with your emotional arc.
+    """
+
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+    prompt = f"""You are an expert music curator and psychologist who understands emotional arcs in human experiences.
+
+A user wants a playlist for this experience: "{request.description}"
+Total songs requested: {request.total_songs}
+
+Analyse the emotional arc of this experience and break it into 2-4 meaningful stages.
+For each stage, define Spotify audio feature thresholds that match that emotional moment.
+
+Return ONLY a valid JSON object with this exact structure (no markdown, no explanation):
+{{
+  "journey_title": "Short evocative title for this journey",
+  "ai_reasoning": "One sentence explaining the emotional arc you identified",
+  "stages": [
+    {{
+      "stage": "Stage name",
+      "description": "What this stage feels like emotionally",
+      "duration_songs": <number of songs, must sum to {request.total_songs}>,
+      "audio_profile": {{
+        "valence_min": <optional, 0.0-1.0>,
+        "valence_max": <optional, 0.0-1.0>,
+        "energy_min": <optional, 0.0-1.0>,
+        "energy_max": <optional, 0.0-1.0>,
+        "tempo_min": <optional, 60-200>,
+        "tempo_max": <optional, 60-200>,
+        "danceability_min": <optional, 0.0-1.0>,
+        "danceability_max": <optional, 0.0-1.0>,
+        "acousticness_min": <optional, 0.0-1.0>,
+        "acousticness_max": <optional, 0.0-1.0>
+      }}
+    }}
+  ]
+}}
+
+Only include audio feature fields that are genuinely relevant to each stage.
+Make sure duration_songs values sum exactly to {request.total_songs}.
+Now analyse: "{request.description}"
+"""
+
+    try:
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=800,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        raw = message.content[0].text.strip()
+
+        # Robustly strip markdown code fences
+        if "```" in raw:
+            # Extract content between first ``` and last ```
+            raw = raw.replace("```json", "").replace("```", "").strip()
+
+        # Find the first { and last } to extract pure JSON
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        if start == -1 or end == 0:
+            raise json.JSONDecodeError("No JSON found", raw, 0)
+        raw = raw[start:end]
+
+        journey_plan = json.loads(raw)
+
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=500,
+            detail="AI returned unexpected format. Please try rephrasing your description."
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"AI service error: {str(e)}"
+        )
+
+    # Build playlist for each stage
+    stages_with_songs = []
+    total_found = 0
+
+    for stage in journey_plan.get("stages", []):
+        profile = stage.get("audio_profile", {})
+        n_songs = stage.get("duration_songs", 3)
+
+        song_query = db.query(models.Song).filter(models.Song.valence != None)
+
+        if "valence_min" in profile:
+            song_query = song_query.filter(models.Song.valence >= profile["valence_min"])
+        if "valence_max" in profile:
+            song_query = song_query.filter(models.Song.valence <= profile["valence_max"])
+        if "energy_min" in profile:
+            song_query = song_query.filter(models.Song.energy >= profile["energy_min"])
+        if "energy_max" in profile:
+            song_query = song_query.filter(models.Song.energy <= profile["energy_max"])
+        if "tempo_min" in profile:
+            song_query = song_query.filter(models.Song.tempo >= profile["tempo_min"])
+        if "tempo_max" in profile:
+            song_query = song_query.filter(models.Song.tempo <= profile["tempo_max"])
+        if "danceability_min" in profile:
+            song_query = song_query.filter(models.Song.danceability >= profile["danceability_min"])
+        if "danceability_max" in profile:
+            song_query = song_query.filter(models.Song.danceability <= profile["danceability_max"])
+        if "acousticness_min" in profile:
+            song_query = song_query.filter(models.Song.acousticness >= profile["acousticness_min"])
+        if "acousticness_max" in profile:
+            song_query = song_query.filter(models.Song.acousticness <= profile["acousticness_max"])
+
+        songs = song_query.order_by(
+            models.Song.popularity.desc()
+        ).limit(n_songs).all()
+
+        total_found += len(songs)
+
+        stages_with_songs.append({
+            "stage": stage.get("stage", "Stage"),
+            "description": stage.get("description", ""),
+            "duration_songs": n_songs,
+            "audio_profile": profile,
+            "songs": [
+                {
+                    "id": s.id,
+                    "title": s.title,
+                    "artist": s.artist,
+                    "genre": s.genre,
+                    "popularity": s.popularity,
+                    "valence": s.valence,
+                    "energy": s.energy,
+                    "tempo": round(s.tempo, 1) if s.tempo else None,
+                    "danceability": s.danceability,
+                    "mood_match": stage.get("stage", "")
+                }
+                for s in songs
+            ]
+        })
+
+    return {
+        "journey_title": journey_plan.get("journey_title", "Your Journey"),
+        "description": request.description,
+        "total_songs": total_found,
+        "ai_reasoning": journey_plan.get("ai_reasoning", ""),
+        "stages": stages_with_songs
     }

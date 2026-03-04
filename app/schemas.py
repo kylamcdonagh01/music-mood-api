@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 
@@ -82,3 +82,22 @@ class RecommendationResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+# --- Journey Schemas ---
+class JourneyRequest(BaseModel):
+    description: str
+    total_songs: Optional[int] = 15
+
+class JourneyStage(BaseModel):
+    stage: str
+    description: str
+    duration_songs: int
+    audio_profile: dict
+    songs: List[RecommendationResponse] = []
+
+class JourneyResponse(BaseModel):
+    journey_title: str
+    description: str
+    total_songs: int
+    ai_reasoning: str
+    stages: List[JourneyStage]

@@ -320,6 +320,27 @@
     <div id="nl-results"><div class="status">Ask the AI anything...</div></div>
     </div>
 
+<!-- Mood Journey -->
+    <div class="card">
+    <h2>🎭 AI Mood Journey — Playlist Architect</h2>
+    <p style="color:#b3b3b3;font-size:0.9rem;margin-bottom:16px;">
+        Describe an experience and Claude will architect a full multi-stage playlist that evolves with your emotional arc.
+    </p>
+
+    <div class="controls" style="margin-bottom:16px;">
+        <input
+        type="text"
+        id="journey-query"
+        placeholder="e.g. gym session from warmup to cooldown..."
+        style="flex:1;min-width:200px;"
+        />
+        <input type="number" id="journey-songs" value="12" min="6" max="30" />
+        <button class="search-btn" onclick="createJourney()">Build Journey</button>
+    </div>
+
+    <div id="journey-results"><div class="status">Describe your experience to begin...</div></div>
+    </div>
+
   <!-- Top Songs -->
   <div class="card">
     <h2>🏆 Top Songs by Logs</h2>
@@ -341,10 +362,11 @@
   // ── Load stats on page load ──────────────────────
 async function loadStats() {
     try {
+      const headers = { "X-API-Key": "musicmoodapi2026" };
       const [moods, logs, topGenres] = await Promise.all([
         fetch(`${API}/moods`).then(r => r.json()),
         fetch(`${API}/logs`).then(r => r.json()),
-        fetch(`${API}/analytics/top-genres`).then(r => r.json()),
+        fetch(`${API}/analytics/top-genres`, { headers }).then(r => r.json()),
       ]);
       const genreCount = new Set(topGenres.map(g => g.genre)).size;
       document.getElementById("stat-songs").textContent = "50,000";
@@ -442,9 +464,10 @@ async function loadStats() {
   // ── Load top songs ───────────────────────────────
   async function loadTopSongs() {
     try {
-      const data = await fetch(`${API}/analytics/top-songs?limit=5`).then(r => r.json());
+      const headers = { "X-API-Key": "musicmoodapi2026" };
+      const data = await fetch(`${API}/analytics/top-songs?limit=5`, { headers }).then(r => r.json());
       const div = document.getElementById("top-songs");
-      if (!data.length) { div.innerHTML = `<div class="status">No logs yet — add some!</div>`; return; }
+      if (!data.length) { div.innerHTML = `<div class="status">No logs yet — add some via the API!</div>`; return; }
       div.innerHTML = data.map((s, i) => `
         <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #2a2a3e">
           <span style="color:#1db954;font-weight:800;font-size:1.2rem;width:24px">${i+1}</span>
@@ -455,29 +478,33 @@ async function loadStats() {
           <span style="margin-left:auto;color:#f9ca24;font-size:0.85rem">🎵 ${s.log_count}</span>
         </div>
       `).join("");
-    } catch(e) {}
+    } catch(e) {
+      document.getElementById("top-songs").innerHTML = `<div class="status">Could not load top songs.</div>`;
+    }
   }
 
-  // ── Load mood trends ─────────────────────────────
-  async function loadMoodTrends() {
+async function loadMoodTrends() {
     try {
-      const data = await fetch(`${API}/analytics/mood-trends`).then(r => r.json());
+      const headers = { "X-API-Key": "musicmoodapi2026" };
+      const data = await fetch(`${API}/analytics/mood-trends`, { headers }).then(r => r.json());
       const div = document.getElementById("mood-trends");
       if (!data.length) { div.innerHTML = `<div class="status">No logs yet.</div>`; return; }
       const max = Math.max(...data.map(d => d.count));
       const icons = { happy:"😊", sad:"😢", energetic:"⚡", calm:"🍃", angry:"🔥" };
       div.innerHTML = data.map(d => `
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-          <span style="width:100px;font-size:0.9rem">${icons[d.mood]||""} ${d.mood}</span>
+          <span style="width:110px;font-size:0.9rem">${icons[d.mood]||""} ${d.mood}</span>
           <div style="flex:1;height:8px;background:#2a2a3e;border-radius:4px;overflow:hidden">
-            <div style="width:${(d.count/max*100)}%;height:100%;background:#1db954;border-radius:4px"></div>
+            <div style="width:${(d.count/max*100)}%;height:100%;background:#1db954;border-radius:4px;transition:width 0.5s ease"></div>
           </div>
           <span style="color:#b3b3b3;font-size:0.85rem;width:30px">${d.count}</span>
         </div>
       `).join("");
-    } catch(e) {}
+    } catch(e) {
+      document.getElementById("mood-trends").innerHTML = `<div class="status">Could not load mood trends.</div>`;
+    }
   }
-
+  
   // ── Natural Language Search ──────────────────────
     async function naturalSearch() {
         const query = document.getElementById("nl-query").value.trim();
@@ -513,6 +540,93 @@ async function loadStats() {
         resultsDiv.innerHTML = `<div class="status">❌ Could not connect to API.</div>`;
         }
     }
+// ── Mood Journey ─────────────────────────────────
+async function createJourney() {
+    const description = document.getElementById("journey-query").value.trim();
+    const totalSongs = parseInt(document.getElementById("journey-songs").value) || 12;
+
+    if (!description) { alert("Please describe your experience!"); return; }
+
+    const resultsDiv = document.getElementById("journey-results");
+    resultsDiv.innerHTML = `<div class="status">🎭 Claude is architecting your journey...</div>`;
+
+    try {
+      const res = await fetch(`${API}/journey`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": "musicmoodapi2026"
+        },
+        body: JSON.stringify({ description, total_songs: totalSongs })
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        resultsDiv.innerHTML = `<div class="status">⚠️ ${err.detail}</div>`;
+        return;
+      }
+
+      const data = await res.json();
+      renderJourney(data, resultsDiv);
+
+    } catch(e) {
+      resultsDiv.innerHTML = `<div class="status">❌ Could not connect to API.</div>`;
+    }
+  }
+
+  function renderJourney(data, container) {
+    const stageColors = ["#1db954", "#f9ca24", "#fd79a8", "#74b9ff"];
+
+    let html = `
+      <div style="margin-bottom:20px;padding:16px;background:#12122a;border-radius:12px;border:1px solid #2a2a3e">
+        <div style="font-size:1.2rem;font-weight:800;margin-bottom:6px">${data.journey_title}</div>
+        <div style="color:#b3b3b3;font-size:0.9rem">🤖 ${data.ai_reasoning}</div>
+        <div style="color:#1db954;font-size:0.85rem;margin-top:6px">🎵 ${data.total_songs} songs across ${data.stages.length} stages</div>
+      </div>
+    `;
+
+    data.stages.forEach((stage, i) => {
+      const color = stageColors[i % stageColors.length];
+      html += `
+        <div style="margin-bottom:20px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+            <div style="width:4px;height:40px;background:${color};border-radius:2px"></div>
+            <div>
+              <div style="font-weight:700;font-size:1rem">${stage.stage}</div>
+              <div style="color:#b3b3b3;font-size:0.85rem">${stage.description}</div>
+            </div>
+            <span style="margin-left:auto;color:${color};font-size:0.85rem">${stage.duration_songs} songs</span>
+          </div>
+          <div class="results-grid">
+            ${stage.songs.map(s => `
+              <div class="song-card" style="border-left:3px solid ${color}">
+                <div class="song-title" title="${s.title}">${s.title}</div>
+                <div class="song-artist">${s.artist}</div>
+                <div class="song-meta">
+                  <span class="tag genre">${s.genre}</span>
+                  <span class="tag popularity">⭐ ${s.popularity}</span>
+                </div>
+                <div class="audio-bars">
+                  <div class="bar-row">
+                    <span>Energy</span>
+                    <div class="bar-track"><div class="bar-fill energy" style="width:${(s.energy*100).toFixed(0)}%"></div></div>
+                    <span>${(s.energy*100).toFixed(0)}%</span>
+                  </div>
+                  <div class="bar-row">
+                    <span>Valence</span>
+                    <div class="bar-track"><div class="bar-fill valence" style="width:${(s.valence*100).toFixed(0)}%"></div></div>
+                    <span>${(s.valence*100).toFixed(0)}%</span>
+                  </div>
+                </div>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      `;
+    });
+
+    container.innerHTML = html;
+  }
 
   // ── Init ─────────────────────────────────────────
   loadStats();
