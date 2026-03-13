@@ -63,6 +63,7 @@ def get_songs(
     genre: str = None,
     artist: str = None,
     search: str = None,
+    limit: int = 20,
     db: Session = Depends(get_db)
 ):
     query = db.query(models.Song)
@@ -72,7 +73,7 @@ def get_songs(
         query = query.filter(models.Song.artist.ilike(f"%{artist}%"))
     if search:
         query = query.filter(models.Song.title.ilike(f"%{search}%"))
-    return query.all()
+    return query.limit(limit).all()
 
 @app.get("/songs/{song_id}", response_model=schemas.SongResponse)
 def get_song(song_id: int, db: Session = Depends(get_db)):
@@ -363,9 +364,12 @@ Now analyse: "{query}"
         raw = raw[start:end]
 
         journey_plan = json.loads(raw)
+        profile = {k: v for k, v in journey_plan.items() if k != "reasoning"}
+        reasoning = journey_plan.get("reasoning", "No reasoning provided")
 
     except HTTPException:
         raise
+
     except json.JSONDecodeError as e:
         raise HTTPException(
             status_code=500,
